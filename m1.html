@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Интерактивное множество Мандельброта с выбором раскраски</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+        canvas { display: block; }
+        #metrics {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        #colorScheme {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="mandelbrotCanvas"></canvas>
+    <div id="metrics"></div>
+    <select id="colorScheme">
+        <option value="0">Стандартный</option>
+        <option value="1">Монохромный</option>
+        <option value="2">Контрастный</option>
+        <option value="3">Яркий</option>
+        <option value="4">Пастельный</option>
+    </select>
+    <script>
+        const canvas = document.getElementById('mandelbrotCanvas');
+        const gl = canvas.getContext('webgl');
+        const metricsDiv = document.getElementById('metrics');
+        const colorSchemeSelect = document.getElementById('colorScheme');
+
+        if (!gl) {
+            alert('WebGL не поддерживается в вашем браузере.');
+            throw new Error('WebGL не поддерживается');
+        }
+
+        const vertexShaderSource = `
+            attribute vec2 a_position;
+            void main() {
+                gl_Position = vec4(a_position, 0.0, 1.0);
+            }
+        `;
+
+        const fragmentShaderSource = `
+            precision highp float;
+            uniform vec2 u_resolution;
+            uniform vec2 u_center;
+            uniform float u_zoom;
+            uniform int u_colorScheme;
+
+            vec3 hsv2rgb(vec3 c) {
+                vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+                vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+                return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+            }
+
+            vec3 getColor(float n, int scheme) {
+                float t = n / 100.0;
+                if (scheme == 0) { // Стандартный
+                    return hsv2rgb(vec3(t, 1.0, 1.0));
+                } else if (scheme == 1) { // Монохромный
+                    return vec3(t);
+                } else if (scheme == 2) { // Контрастный
+                    return hsv2rgb(vec3(t * 0.5, 1.0, 1.0));
+                } else if (scheme == 3) { // Яркий
+                    return hsv2rgb(vec3(t * 3.0, 1.0, 1.0));
+                } else if (scheme == 4) { // Пастельный
+                    return hsv2rgb(vec3(t, 0.5, 1.0));
+                }
+                return vec3(0.0);
+            }
+
+            void main() {
+                vec2 z, c;
+                c.x = (gl_FragCoord.x - u_resolution.x / 2.0) / (u_zoom * u_resolution.y) + u_center.x;
+                c.y = (gl_FragCoord.y - u_resolution.y / 2.0) / (u_zoom * u_resolution.y) + u_center.y;
+
+                z = c;
+                float n = 0.0;
+                for(int i = 0; i < 100; i++) {
+                    if(z.x * z.x + z.y * z.y > 4.0) break;
+                    z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+                    n += 1.0;
+                }
+
+                vec3 color = (n == 100.0) ? vec3(0.0) : getColor(n, u_colorScheme);
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Ошибка компиляции шейдера:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error('Ошибка линковки программы:', gl.getProgramInfoLog(program));
+            throw new Error('Ошибка линковки программы');
+        }
+
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+
+        const positionAttributeLocation = gl.getAttribLocation(program, 'a_position');
+        gl.enableVertexAttribArray(positionAttributeLocation);
+        gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+        const resolutionUniformLocation = gl.getUniformLocation(program, 'u_resolution');
+        const centerUniformLocation = gl.getUniformLocation(program, 'u_center');
+        const zoomUniformLocation = gl.getUniformLocation(program, 'u_zoom');
+        const colorSchemeUniformLocation = gl.getUniformLocation(program, 'u_colorScheme');
+
+        let centerX = -0.5;
+        let centerY = 0;
+        let zoom = 0.5;
+        let isDragging = false;
+        let lastMouseX, lastMouseY;
+        let colorScheme = 0;
+
+        function updateMetrics(renderTime) {
+            metricsDiv.innerHTML = `
+                Центр: (${centerX.toFixed(6)}, ${centerY.toFixed(6)})<br>
+                Масштаб: ${zoom.toFixed(6)}<br>
+                Время рендеринга: ${renderTime.toFixed(2)} мс
+            `;
+        }
+
+        function drawMandelbrot() {
+            const startTime = performance.now();
+
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+
+            gl.clearColor(0, 0, 0, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.useProgram(program);
+            gl.uniform2f(resolutionUniformLocation, canvas.width, canvas.height);
+            gl.uniform2f(centerUniformLocation, centerX, centerY);
+            gl.uniform1f(zoomUniformLocation, zoom);
+            gl.uniform1i(colorSchemeUniformLocation, colorScheme);
+
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+            const endTime = performance.now();
+            const renderTime = endTime - startTime;
+
+            updateMetrics(renderTime);
+        }
+
+        function handleMouseDown(event) {
+            isDragging = true;
+            lastMouseX = event.clientX;
+            lastMouseY = event.clientY;
+        }
+
+        function handleMouseMove(event) {
+            if (!isDragging) return;
+            const deltaX = event.clientX - lastMouseX;
+            const deltaY = event.clientY - lastMouseY;
+            centerX -= deltaX / (zoom * canvas.height);
+            centerY += deltaY / (zoom * canvas.height);
+            lastMouseX = event.clientX;
+            lastMouseY = event.clientY;
+            drawMandelbrot();
+        }
+
+        function handleMouseUp() {
+            isDragging = false;
+        }
+
+        function handleWheel(event) {
+            event.preventDefault();
+            const zoomFactor = 1.1;
+            zoom *= event.deltaY > 0 ? 1 / zoomFactor : zoomFactor;
+            drawMandelbrot();
+        }
+
+        function handleColorSchemeChange() {
+            colorScheme = parseInt(colorSchemeSelect.value);
+            drawMandelbrot();
+        }
+
+        window.addEventListener('resize', drawMandelbrot);
+        canvas.addEventListener('mousedown', handleMouseDown);
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('mouseup', handleMouseUp);
+        canvas.addEventListener('wheel', handleWheel);
+        colorSchemeSelect.addEventListener('change', handleColorSchemeChange);
+
+        drawMandelbrot();
+    </script>
+</body>
+</html>
