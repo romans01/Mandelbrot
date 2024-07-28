@@ -39,6 +39,8 @@
         <option value="3">Яркий</option>
         <option value="4">Пастельный</option>
     </select>
+    <!-- Добавить кнопку "Полет" в HTML -->
+<button id="flyButton" style="position: absolute; top: 50px; right: 10px; background-color: rgba(0, 0, 0, 0.7); color: white; padding: 5px; border-radius: 5px; font-size: 14px;">Полет</button>
     <script>
         const canvas = document.getElementById('mandelbrotCanvas');
         const gl = canvas.getContext('webgl');
@@ -58,6 +60,7 @@
         `;
 
         const fragmentShaderSource = `
+            #extension GL_OES_standard_derivatives : enable
             precision highp float;
             uniform vec2 u_resolution;
             uniform vec2 u_center;
@@ -71,7 +74,7 @@
             }
 
             vec3 getColor(float n, int scheme) {
-                float t = n / 100.0;
+                float t = n / 50.0;
                 if (scheme == 0) { // Стандартный
                     return hsv2rgb(vec3(t, 1.0, 1.0));
                 } else if (scheme == 1) { // Монохромный
@@ -93,7 +96,7 @@
 
                 z = c;
                 float n = 0.0;
-                for(int i = 0; i < 100; i++) {
+                for(int i = 0; i < 300; i++) {
                     if(z.x * z.x + z.y * z.y > 4.0) break;
                     z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
                     n += 1.0;
@@ -222,6 +225,47 @@
         colorSchemeSelect.addEventListener('change', handleColorSchemeChange);
 
         drawMandelbrot();
+//*****************************
+        // Создать переменные для хранения текущих направлений движения и изменения масштаба
+let isFlying = false;
+let directionX = 0;
+let directionY = 0;
+let zoomDirection = 0;
+
+function getRandomDirection() {
+    return (Math.random() - 0.5) * 0.001; // Уменьшить шаг для более плавного движения
+}
+
+function updateDirections() {
+    directionX = getRandomDirection();
+    directionY = getRandomDirection();
+    zoomDirection = 1 + (Math.random() - 0.5) * 0.002; // Уменьшить шаг для более плавного изменения масштаба
+}
+
+function fly() {
+    if (!isFlying) return;
+
+    centerX += directionX;
+    centerY += directionY;
+    zoom *= zoomDirection;
+
+    drawMandelbrot();
+    requestAnimationFrame(fly);
+}
+
+// Обновлять направления каждые 8 секунд
+setInterval(updateDirections, 8000);
+
+// Добавить обработчик событий для кнопки "Полет"
+document.getElementById('flyButton').addEventListener('click', () => {
+    isFlying = !isFlying;
+    if (isFlying) {
+        updateDirections(); // Обновить направления при старте
+        fly();
+    }
+});
+
+
     </script>
 </body>
 </html>
